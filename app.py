@@ -206,7 +206,7 @@ if path1 or path2:
     if isinstance(df1_full, pd.DataFrame):
         st.success(f"Loaded File 1 with {len(df1_full):,} rows and {len(df1_full.columns)} columns.")
     if isinstance(df2_full, pd.DataFrame):
-        st.success(f"Loaded File 2 with {len[df2_full]:,} rows and {len(df2_full.columns)} columns.")
+        st.success(f"Loaded File 2 with {len(df2_full):,} rows and {len(df2_full.columns)} columns.")
 
 # ---------------- VLOOKUP Logic ----------------
 if st.session_state.show_vlookup:
