@@ -5,14 +5,30 @@ import warnings
 import pandas as pd
 import streamlit as st
 
+# ---------------- Setup ----------------
 warnings.filterwarnings("ignore")
 st.set_page_config(page_title="DEAL File", page_icon="📂", layout="wide")
 
-# -------- Constants --------
-PREVIEW_ROWS = 1000
+# ---- Hide Streamlit Default UI (menu/header/footer/share/status/fullscreen) ----
+st.markdown(
+    """
+    <style>
+      #MainMenu {visibility: hidden;}
+      header {visibility: hidden;}
+      footer {visibility: hidden;}
+      .stApp > header {display: none;}
+      div[data-testid="stStatusWidget"] {visibility: hidden;}
+      button[title="View fullscreen"] {visibility: hidden;}
+      .block-container {padding-top: 1rem;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+PREVIEW_ROWS = 1000  # constants
 
 
-# -------- Utility: save uploaded file to temp path --------
+# ---------------- Utility ----------------
 def _to_tempfile(uploaded) -> str | None:
     if not uploaded:
         return None
@@ -23,7 +39,25 @@ def _to_tempfile(uploaded) -> str | None:
     return path
 
 
-# -------- Cached Readers (by path) --------
+def _arrow_sanitize(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Make a DataFrame Arrow/pyarrow-friendly by ensuring object cols are strings.
+    Also safely decode any bytes/bytearray to UTF-8 before casting to str.
+    """
+    if df is None or not isinstance(df, pd.DataFrame):
+        return df
+    out = df.copy()
+    for col in out.columns:
+        if out[col].dtype == "object":
+            out[col] = out[col].map(
+                lambda v: v.decode("utf-8", "ignore") if isinstance(v, (bytes, bytearray)) else v
+            )
+            # Cast the whole column to string to avoid mixed-type Arrow issues
+            out[col] = out[col].astype("string")  # pandas nullable string dtype
+    return out
+
+
+# ---------------- Cached Readers ----------------
 @st.cache_data(show_spinner=False)
 def _read_csv_preview_path(path: str, skiprows: int = 0, nrows: int = PREVIEW_ROWS):
     try:
@@ -35,39 +69,36 @@ def _read_csv_preview_path(path: str, skiprows: int = 0, nrows: int = PREVIEW_RO
 @st.cache_data(show_spinner=False)
 def _read_excel_preview_path(path: str, skiprows: int = 0, nrows: int = PREVIEW_ROWS, sheet_name=0):
     try:
-        return pd.read_excel(path, skiprows=skiprows, nrows=nrows, sheet_name=sheet_name, engine="openpyxl")
+        return pd.read_excel(path, skiprows=skiprows, nrows=nrows,
+                             sheet_name=sheet_name, engine="openpyxl")
     except Exception:
-        return pd.read_excel(path, skiprows=skiprows, sheet_name=sheet_name, engine="openpyxl").head(nrows)
+        return pd.read_excel(path, skiprows=skiprows,
+                             sheet_name=sheet_name, engine="openpyxl").head(nrows)
 
 
 @st.cache_data(show_spinner=False)
 def _read_csv_full_path(path: str, skiprows: int = 0, usecols=None, dtype_backend="pyarrow"):
     try:
         return pd.read_csv(path, skiprows=skiprows, usecols=usecols, dtype_backend=dtype_backend)
-    except TypeError:
-        # For older pandas without dtype_backend
+    except TypeError:  # pandas < 2.0
         return pd.read_csv(path, skiprows=skiprows, usecols=usecols)
 
 
 @st.cache_data(show_spinner=False)
-def _read_excel_full_path(path: str, skiprows: int = 0, sheet_name=0, usecols=None, dtype_backend="pyarrow"):
+def _read_excel_full_path(path: str, skiprows: int = 0,
+                          sheet_name=0, usecols=None, dtype_backend="pyarrow"):
     try:
-        return pd.read_excel(
-            path,
-            skiprows=skiprows,
-            sheet_name=sheet_name,
-            usecols=usecols,
-            engine="openpyxl",
-            dtype_backend=dtype_backend,
-        )
+        return pd.read_excel(path, skiprows=skiprows, sheet_name=sheet_name,
+                             usecols=usecols, engine="openpyxl", dtype_backend=dtype_backend)
     except TypeError:
-        return pd.read_excel(path, skiprows=skiprows, sheet_name=sheet_name, usecols=usecols, engine="openpyxl")
+        return pd.read_excel(path, skiprows=skiprows,
+                             sheet_name=sheet_name, usecols=usecols, engine="openpyxl")
 
 
 @st.cache_data(show_spinner=False)
 def _get_excel_sheet_names(path: str):
     try:
-        import openpyxl  # ensure engine availability
+        import openpyxl
         xls = pd.ExcelFile(path, engine="openpyxl")
         return xls.sheet_names
     except Exception:
@@ -78,21 +109,21 @@ def _safe_cols(df):
     return [str(c) for c in df.columns]
 
 
-# -------- Sidebar: Upload (no manual sheet/column picks for loading) --------
+# ---------------- Sidebar: Upload ----------------
 st.sidebar.header("Upload Files")
 file1 = st.sidebar.file_uploader("First File", type=["csv", "xlsx", "xls"], key="file1")
 skip1 = st.sidebar.number_input("Skip rows (File 1)", 0, 100000, 0, 1)
 file2 = st.sidebar.file_uploader("Second File", type=["csv", "xlsx", "xls"], key="file2")
 skip2 = st.sidebar.number_input("Skip rows (File 2)", 0, 100000, 0, 1)
 
-# Always use first sheet for Excel
-sheet1 = 0
+sheet1 = 0  # always use first sheet
 sheet2 = 0
 
 path1 = _to_tempfile(file1) if file1 else None
 path2 = _to_tempfile(file2) if file2 else None
 
-# -------- VLOOKUP Toggle (button retained) --------
+
+# ---------------- VLOOKUP Toggle ----------------
 if "show_vlookup" not in st.session_state:
     st.session_state.show_vlookup = False
 
@@ -101,11 +132,14 @@ with ctrl_right:
     if st.button("🔍 VLOOKUP"):
         st.session_state.show_vlookup = not st.session_state.show_vlookup
 
-# -------- Title --------
+
+# ---------------- Title ----------------
 st.title("📂 File Viewer")
 
-# -------- Previews --------
+
+# ---------------- Previews ----------------
 df1_prev, df2_prev = None, None
+
 if path1:
     if file1.name.lower().endswith((".csv", ".csv.gz", ".csv.zip")):
         df1_prev = _read_csv_preview_path(path1, skip1, PREVIEW_ROWS)
@@ -122,14 +156,15 @@ c1, c2 = st.columns(2)
 if isinstance(df1_prev, pd.DataFrame):
     with c1:
         st.markdown(f"### 📄 File 1: `{file1.name}` (skip {skip1})")
-        st.dataframe(df1_prev, use_container_width=True, height=420)
+        st.dataframe(_arrow_sanitize(df1_prev), width="stretch", height=420)
 
 if isinstance(df2_prev, pd.DataFrame):
     with c2:
         st.markdown(f"### 📄 File 2: `{file2.name}` (skip {skip2})")
-        st.dataframe(df2_prev, use_container_width=True, height=420)
+        st.dataframe(_arrow_sanitize(df2_prev), width="stretch", height=420)
 
-# -------- Always load FULL files immediately after upload --------
+
+# ---------------- Full File Load ----------------
 df1_full, df2_full = None, None
 if path1 or path2:
     with st.spinner("Loading full datasets..."):
@@ -150,7 +185,8 @@ if path1 or path2:
     if isinstance(df2_full, pd.DataFrame):
         st.success(f"Loaded File 2 with {len(df2_full):,} rows and {len(df2_full.columns)} columns.")
 
-# -------- VLOOKUP Logic (manual trigger via button preserved) --------
+
+# ---------------- VLOOKUP Logic ----------------
 if st.session_state.show_vlookup:
     st.markdown("---")
     st.subheader("🔍 VLOOKUP (File 2 → File 1)")
@@ -172,6 +208,7 @@ if st.session_state.show_vlookup:
                         "Columns to bring from File 2",
                         options=[col for col in cols2 if col != right_key],
                     )
+
                 stream_mode = st.toggle(
                     "Stream mode (very large CSVs)",
                     value=False,
@@ -182,7 +219,7 @@ if st.session_state.show_vlookup:
             if run:
                 try:
                     if stream_mode and file1.name.lower().endswith((".csv", ".csv.gz", ".csv.zip")):
-                        tmp_path = vlookup_stream_csv( # type: ignore
+                        tmp_path = vlookup_stream_csv(
                             path1, path2, left_key, right_key, fetch_cols, skip1, skip2
                         )
                         with open(tmp_path, "rb") as f:
@@ -195,7 +232,7 @@ if st.session_state.show_vlookup:
                             mime="text/csv",
                         )
                     else:
-                        # Ensure both keys are strings to avoid dtype mismatch (int64 vs string)
+                        # Ensure both keys are strings
                         right = df2_full.drop_duplicates(subset=[right_key], keep="first").copy()
                         right[right_key] = right[right_key].astype(str)
                         right = right.set_index(right_key)
@@ -206,7 +243,10 @@ if st.session_state.show_vlookup:
                         for col in fetch_cols:
                             out[col] = out[left_key].map(right[col])
 
-                        st.dataframe(out.head(PREVIEW_ROWS), use_container_width=True, height=440)
+                        # Sanitize before display to avoid ArrowTypeError
+                        st.dataframe(_arrow_sanitize(out.head(PREVIEW_ROWS)),
+                                     width="stretch", height=440)
+
                         csv = out.to_csv(index=False).encode("utf-8-sig")
                         st.download_button(
                             "⬇️ Download VLOOKUP Result (CSV)",
@@ -218,14 +258,14 @@ if st.session_state.show_vlookup:
                     st.error(f"VLOOKUP failed: {e}")
 
 
-# -------- Streaming helper for very large CSVs (with safe key casting) --------
-def vlookup_stream_csv(
-    path_file1, path_file2, left_key, right_key, fetch_cols, skip1=0, skip2=0, chunk=200_000
-):
-    # Build right-side dicts once (keys as string)
+# ---------------- Streaming Helper ----------------
+def vlookup_stream_csv(path_file1, path_file2, left_key, right_key,
+                       fetch_cols, skip1=0, skip2=0, chunk=200_000):
+    """Chunked VLOOKUP for huge CSVs."""
     right = pd.read_csv(path_file2, skiprows=skip2)
     if right_key not in right.columns:
         raise KeyError(f"Key `{right_key}` not found in File 2.")
+
     right[right_key] = right[right_key].astype(str)
     right = right.drop_duplicates(subset=[right_key], keep="first").set_index(right_key)
     maps = {col: right[col].to_dict() for col in fetch_cols}
@@ -237,11 +277,17 @@ def vlookup_stream_csv(
     for chunk_df in pd.read_csv(path_file1, skiprows=skip1, chunksize=chunk):
         if left_key not in chunk_df.columns:
             raise KeyError(f"Key `{left_key}` not found in File 1 chunk.")
+
         chunk_df[left_key] = chunk_df[left_key].astype(str)
         for col in fetch_cols:
             chunk_df[col] = chunk_df[left_key].map(maps[col])
+
         chunk_df.to_csv(
-            tmp_path, index=False, mode="w" if first else "a", header=first, encoding="utf-8-sig"
+            tmp_path,
+            index=False,
+            mode="w" if first else "a",
+            header=first,
+            encoding="utf-8-sig"
         )
         first = False
 
