@@ -1,0 +1,11 @@
+[server]
+enableCORS = true
+headless = true
+maxUploadSize = 500
+fileWatcherType = "none"
+
+[client]
+showErrorDetails = true
+
+[theme]
+base = "dark"
