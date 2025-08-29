@@ -6,32 +6,40 @@ import streamlit as st
 warnings.filterwarnings("ignore")
 st.set_page_config(page_title="DEAL File", page_icon="📂", layout="wide")
 
-# -------- Extra CSS to remove bottom Streamlit logos --------
+# ========== Hide ALL Streamlit chrome (toolbar/menu/footer/badges) ==========
 st.markdown(
     """
     <style>
-    /* Hide bottom-left blue Streamlit icon */
-    div[data-testid="stDecoration"] {visibility: hidden !important;}
-    .stDecoration {display: none !important;}
+      /* Top-right toolbar (Fork/GitHub/...) */
+      div[data-testid="stToolbar"] { visibility: hidden !important; height: 0 !important; }
 
-    /* Hide bottom-right "Made with Streamlit" button */
-    div[data-testid="stStatusWidget"] {display: none !important;}
-    .stStatusWidget {display: none !important;}
+      /* App hamburger menu + header bar */
+      #MainMenu { visibility: hidden !important; }
+      header { visibility: hidden !important; }
 
-    /* Handle older/newer Streamlit builds */
-    .viewerBadge_link__1S137,
-    .viewerBadge_container__r5tak {
-        display: none !important;
-    }
+      /* Footer */
+      footer { visibility: hidden !important; }
+
+      /* Bottom-left blue Streamlit icon (old/new testids) */
+      div[data-testid="stDecoration"] { visibility: hidden !important; }
+      .stDecoration { display: none !important; }
+
+      /* Bottom-right "Made with Streamlit" button (old/new testids) */
+      div[data-testid="stStatusWidget"] { display: none !important; }
+      .stStatusWidget { display: none !important; }
+      .viewerBadge_link__1S137, .viewerBadge_container__r5tak { display:none !important; }
+
+      /* Prevent any reserved space */
+      .stApp { padding-bottom: 0 !important; }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# -------- Constants --------
+# ========== Constants ==========
 PREVIEW_ROWS = 1000
 
-# -------- Helpers to make DataFrames Arrow-safe for st.dataframe --------
+# ========== Helpers to make DataFrames Arrow-safe for st.dataframe ==========
 def _arrow_safe_df(df: pd.DataFrame | None) -> pd.DataFrame | None:
     """Drop index-like Unnamed columns and fix mixed-type object columns to avoid PyArrow errors."""
     if df is None or not isinstance(df, pd.DataFrame):
@@ -40,7 +48,7 @@ def _arrow_safe_df(df: pd.DataFrame | None) -> pd.DataFrame | None:
 
     # Drop 'Unnamed:*' columns (common when Excel index is saved)
     cols = pd.Index([str(c) for c in out.columns])
-    mask = ~cols.str.match(r"^Unnamed(:\\s*\\d+)?$")
+    mask = ~cols.str.match(r"^Unnamed(:\s*\d+)?$")
     out = out.loc[:, mask]
     out.columns = [str(c) for c in out.columns]
 
@@ -54,7 +62,7 @@ def _arrow_safe_df(df: pd.DataFrame | None) -> pd.DataFrame | None:
                 out[c] = out[c].astype(str)
     return out
 
-# -------- Excel engine detection --------
+# ========== Excel engine detection + generic reader ==========
 def _excel_engine_for_name(lower_name: str) -> str | None:
     if lower_name.endswith(".xls"):
         return "xlrd"       # old Excel
@@ -85,7 +93,7 @@ def _read_excel_generic(content_bytes: bytes, skiprows: int = 0, sheet_name=0, n
                 st.error("Failed to read .xlsx. Install openpyxl: `pip install openpyxl`")
             raise e2
 
-# -------- Cached Readers --------
+# ========== Cached Readers ==========
 @st.cache_data(show_spinner=False)
 def _read_csv_preview(content_bytes: bytes, skiprows: int = 0, nrows: int = PREVIEW_ROWS):
     buf = io.BytesIO(content_bytes)
@@ -122,6 +130,7 @@ def _read_preview(uploaded, skiprows=0):
     name = uploaded.name
     if name.lower().endswith(".csv"):
         return _read_csv_preview(data, skiprows=skiprows, nrows=PREVIEW_ROWS)
+    # .xlsx or .xls
     return _read_excel_preview(data, file_name=name, skiprows=skiprows, nrows=PREVIEW_ROWS)
 
 def _read_full(uploaded, skiprows=0):
@@ -131,19 +140,20 @@ def _read_full(uploaded, skiprows=0):
     name = uploaded.name
     if name.lower().endswith(".csv"):
         return _read_csv_full(data, skiprows=skiprows)
+    # .xlsx or .xls
     return _read_excel_full(data, file_name=name, skiprows=skiprows)
 
 def _safe_cols(df):
     return [str(c) for c in df.columns]
 
-# -------- Sidebar: Upload (needed before VLOOKUP) --------
+# ========== Sidebar: Upload (needed before VLOOKUP) ==========
 st.sidebar.header("Upload Files")
 file1 = st.sidebar.file_uploader("First File", type=["csv", "xlsx", "xls"], key="file1")
 skip1 = st.sidebar.number_input("Skip rows (File 1)", 0, 100000, 0, 1)
 file2 = st.sidebar.file_uploader("Second File", type=["csv", "xlsx", "xls"], key="file2")
 skip2 = st.sidebar.number_input("Skip rows (File 2)", 0, 100000, 0, 1)
 
-# -------- Top Controls: VLOOKUP Toggle (ABOVE the title) --------
+# ========== Top Controls: VLOOKUP Toggle ==========
 if "show_vlookup" not in st.session_state:
     st.session_state.show_vlookup = False
 
@@ -152,7 +162,7 @@ with ctrl_right:
     if st.button("🔍 VLOOKUP"):
         st.session_state.show_vlookup = not st.session_state.show_vlookup
 
-# -------- VLOOKUP Logic (renders ABOVE the DEAL File Viewer) --------
+# ========== VLOOKUP (above viewer) ==========
 if st.session_state.show_vlookup:
     st.markdown("---")
     st.subheader("🔍 VLOOKUP (File 2 → File 1)")
@@ -228,10 +238,10 @@ if st.session_state.show_vlookup:
                 except Exception as e:
                     st.error(f"VLOOKUP failed: {e}")
 
-# -------- Title --------
+# ========== Title ==========
 st.title("📂 File Viewer")
 
-# -------- Previews (BELOW title) --------
+# ========== Previews (below title) ==========
 df1_prev = _read_preview(file1, skip1) if file1 else None
 df2_prev = _read_preview(file2, skip2) if file2 else None
 
