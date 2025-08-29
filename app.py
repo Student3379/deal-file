@@ -6,23 +6,23 @@ import streamlit as st
 warnings.filterwarnings("ignore")
 st.set_page_config(page_title="DEAL File", page_icon="📂", layout="wide")
 
-# -------- Hide Streamlit default UI (toolbar, menu, badges) --------
+# -------- Extra CSS to remove bottom Streamlit logos --------
 st.markdown(
     """
     <style>
-      /* Hide top-right toolbar (Fork/GitHub/...) */
-      div[data-testid="stToolbar"] { visibility: hidden; height: 0; }
-      /* Hide hamburger menu + header bar */
-      #MainMenu {visibility: hidden;}
-      header {visibility: hidden;}
-      /* Hide footer */
-      footer {visibility: hidden;}
-      /* Hide bottom-left Streamlit watermark (older/newer testids) */
-      div[data-testid="stDecoration"] {visibility: hidden;}
-      .viewerBadge_link__1S137, .viewerBadge_container__r5tak {display:none;}
-      /* Hide bottom-right status / "Made with Streamlit" (older/newer testids) */
-      div[data-testid="stStatusWidget"] {display: none;}
-      .stApp > div:nth-child(3) > div > div > div > div:has(.stStatusWidget) {display:none;}
+    /* Hide bottom-left blue Streamlit icon */
+    div[data-testid="stDecoration"] {visibility: hidden !important;}
+    .stDecoration {display: none !important;}
+
+    /* Hide bottom-right "Made with Streamlit" button */
+    div[data-testid="stStatusWidget"] {display: none !important;}
+    .stStatusWidget {display: none !important;}
+
+    /* Handle older/newer Streamlit builds */
+    .viewerBadge_link__1S137,
+    .viewerBadge_container__r5tak {
+        display: none !important;
+    }
     </style>
     """,
     unsafe_allow_html=True
