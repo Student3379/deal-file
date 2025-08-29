@@ -2,57 +2,80 @@ import io
 import warnings
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 warnings.filterwarnings("ignore")
 st.set_page_config(page_title="DEAL File", page_icon="📂", layout="wide")
 
-# ========== Hide ALL Streamlit chrome (toolbar/menu/footer/badges) ==========
+# ========== Hide Streamlit chrome (CSS) ==========
 st.markdown(
     """
     <style>
-      /* Top-right toolbar (Fork/GitHub/...) */
-      div[data-testid="stToolbar"] { visibility: hidden !important; height: 0 !important; }
+      /* Top-right toolbar, menu, header, footer */
+      div[data-testid="stToolbar"]{visibility:hidden !important;height:0 !important;}
+      #MainMenu{visibility:hidden !important;}
+      header{visibility:hidden !important;}
+      footer{visibility:hidden !important;}
 
-      /* App hamburger menu + header bar */
-      #MainMenu { visibility: hidden !important; }
-      header { visibility: hidden !important; }
+      /* Bottom-left blue Streamlit icon (old/new) */
+      div[data-testid="stDecoration"]{visibility:hidden !important; display:none !important;}
+      .stDecoration{display:none !important;}
 
-      /* Footer */
-      footer { visibility: hidden !important; }
+      /* Bottom-right "Made with Streamlit" badge (old/new) */
+      div[data-testid="stStatusWidget"]{display:none !important;}
+      .stStatusWidget{display:none !important;}
+      .viewerBadge_link__1S137, .viewerBadge_container__r5tak{display:none !important;}
 
-      /* Bottom-left blue Streamlit icon (old/new testids) */
-      div[data-testid="stDecoration"] { visibility: hidden !important; }
-      .stDecoration { display: none !important; }
+      /* Nuke any anchors that look like the viewer badge, just in case */
+      a[href*="streamlit.io"]{display:none !important;}
 
-      /* Bottom-right "Made with Streamlit" button (old/new testids) */
-      div[data-testid="stStatusWidget"] { display: none !important; }
-      .stStatusWidget { display: none !important; }
-      .viewerBadge_link__1S137, .viewerBadge_container__r5tak { display:none !important; }
-
-      /* Prevent any reserved space */
-      .stApp { padding-bottom: 0 !important; }
+      /* Prevent leftover spacing */
+      .stApp{padding-bottom:0 !important;}
     </style>
     """,
     unsafe_allow_html=True
 )
 
+# ========== Extra JS guard (removes badges on every rerender) ==========
+components.html(
+    """
+    <script>
+      const hideBadges = () => {
+        const selectors = [
+          '[data-testid="stDecoration"]',
+          '[data-testid="stStatusWidget"]',
+          '.viewerBadge_link__1S137',
+          '.viewerBadge_container__r5tak',
+          'a[href*="streamlit.io"]'
+        ];
+        selectors.forEach(sel => {
+          document.querySelectorAll(sel).forEach(el => {
+            el.style.display = 'none';
+            el.style.visibility = 'hidden';
+            el.style.opacity = '0';
+            el.style.pointerEvents = 'none';
+          });
+        });
+      };
+      hideBadges();
+      new MutationObserver(hideBadges).observe(document.body, {subtree:true, childList:true, attributes:true});
+    </script>
+    """,
+    height=0, width=0
+)
+
 # ========== Constants ==========
 PREVIEW_ROWS = 1000
 
-# ========== Helpers to make DataFrames Arrow-safe for st.dataframe ==========
+# ========== Arrow-safe helper ==========
 def _arrow_safe_df(df: pd.DataFrame | None) -> pd.DataFrame | None:
-    """Drop index-like Unnamed columns and fix mixed-type object columns to avoid PyArrow errors."""
     if df is None or not isinstance(df, pd.DataFrame):
         return df
     out = df.copy()
-
-    # Drop 'Unnamed:*' columns (common when Excel index is saved)
     cols = pd.Index([str(c) for c in out.columns])
-    mask = ~cols.str.match(r"^Unnamed(:\s*\d+)?$")
+    mask = ~cols.str.match(r"^Unnamed(:\\s*\\d+)?$")
     out = out.loc[:, mask]
     out.columns = [str(c) for c in out.columns]
-
-    # For object columns with mixed Python types, cast to string
     for c in out.columns:
         if pd.api.types.is_object_dtype(out[c]):
             try:
@@ -65,21 +88,15 @@ def _arrow_safe_df(df: pd.DataFrame | None) -> pd.DataFrame | None:
 # ========== Excel engine detection + generic reader ==========
 def _excel_engine_for_name(lower_name: str) -> str | None:
     if lower_name.endswith(".xls"):
-        return "xlrd"       # old Excel
+        return "xlrd"
     if lower_name.endswith(".xlsx"):
-        return "openpyxl"   # modern Excel
+        return "openpyxl"
     return None
 
 def _read_excel_generic(content_bytes: bytes, skiprows: int = 0, sheet_name=0, nrows: int | None = None, file_name: str = ""):
-    """
-    Centralized Excel reader:
-      - .xls -> xlrd, .xlsx -> openpyxl
-      - tries explicit engine, then falls back without engine
-    """
     lower = file_name.lower() if file_name else ""
     engine = _excel_engine_for_name(lower)
     buf = io.BytesIO(content_bytes)
-
     try:
         return pd.read_excel(buf, skiprows=skiprows, nrows=nrows, sheet_name=sheet_name, engine=engine)
     except Exception:
@@ -93,7 +110,7 @@ def _read_excel_generic(content_bytes: bytes, skiprows: int = 0, sheet_name=0, n
                 st.error("Failed to read .xlsx. Install openpyxl: `pip install openpyxl`")
             raise e2
 
-# ========== Cached Readers ==========
+# ========== Cached readers ==========
 @st.cache_data(show_spinner=False)
 def _read_csv_preview(content_bytes: bytes, skiprows: int = 0, nrows: int = PREVIEW_ROWS):
     buf = io.BytesIO(content_bytes)
@@ -130,7 +147,6 @@ def _read_preview(uploaded, skiprows=0):
     name = uploaded.name
     if name.lower().endswith(".csv"):
         return _read_csv_preview(data, skiprows=skiprows, nrows=PREVIEW_ROWS)
-    # .xlsx or .xls
     return _read_excel_preview(data, file_name=name, skiprows=skiprows, nrows=PREVIEW_ROWS)
 
 def _read_full(uploaded, skiprows=0):
@@ -140,29 +156,28 @@ def _read_full(uploaded, skiprows=0):
     name = uploaded.name
     if name.lower().endswith(".csv"):
         return _read_csv_full(data, skiprows=skiprows)
-    # .xlsx or .xls
     return _read_excel_full(data, file_name=name, skiprows=skiprows)
 
 def _safe_cols(df):
     return [str(c) for c in df.columns]
 
-# ========== Sidebar: Upload (needed before VLOOKUP) ==========
+# ========== Sidebar ==========
 st.sidebar.header("Upload Files")
 file1 = st.sidebar.file_uploader("First File", type=["csv", "xlsx", "xls"], key="file1")
 skip1 = st.sidebar.number_input("Skip rows (File 1)", 0, 100000, 0, 1)
 file2 = st.sidebar.file_uploader("Second File", type=["csv", "xlsx", "xls"], key="file2")
 skip2 = st.sidebar.number_input("Skip rows (File 2)", 0, 100000, 0, 1)
 
-# ========== Top Controls: VLOOKUP Toggle ==========
+# ========== VLOOKUP toggle ==========
 if "show_vlookup" not in st.session_state:
     st.session_state.show_vlookup = False
 
-ctrl_left, ctrl_right = st.columns([0.7, 0.3])
+_, ctrl_right = st.columns([0.7, 0.3])
 with ctrl_right:
     if st.button("🔍 VLOOKUP"):
         st.session_state.show_vlookup = not st.session_state.show_vlookup
 
-# ========== VLOOKUP (above viewer) ==========
+# ========== VLOOKUP ==========
 if st.session_state.show_vlookup:
     st.markdown("---")
     st.subheader("🔍 VLOOKUP (File 2 → File 1)")
@@ -195,16 +210,9 @@ if st.session_state.show_vlookup:
 
             if run:
                 try:
-                    # De-duplicate on the right key to emulate Excel's first-match behavior
                     right = df2_full.drop_duplicates(subset=[right_key], keep="first")
-
-                    # If any fetched column name already exists in File 1, keep same name (no suffix)
-                    renamed_cols = {}
-                    for col in fetch_cols:
-                        if col in df1_full.columns:
-                            renamed_cols[col] = f"{col}"
+                    renamed_cols = {col: col for col in fetch_cols if col in df1_full.columns}
                     right = right.rename(columns=renamed_cols)
-
                     use_cols = [right_key] + [renamed_cols.get(c, c) for c in fetch_cols]
 
                     merged = df1_full.merge(
@@ -215,15 +223,13 @@ if st.session_state.show_vlookup:
                         suffixes=("", " "),
                     )
 
-                    # Drop duplicate key column if keys differ
                     if right_key != left_key and right_key in merged.columns:
                         merged.drop(columns=[right_key], inplace=True)
 
-                    # Preview safely
                     merged_preview = _arrow_safe_df(merged.head(PREVIEW_ROWS))
                     st.dataframe(merged_preview, width="stretch", height=440)
 
-                    # ===== Download as EXCEL (.xlsx) =====
+                    # Download as Excel
                     xbuf = io.BytesIO()
                     with pd.ExcelWriter(xbuf, engine="openpyxl") as writer:
                         merged.to_excel(writer, index=False, sheet_name="VLOOKUP")
@@ -241,7 +247,7 @@ if st.session_state.show_vlookup:
 # ========== Title ==========
 st.title("📂 File Viewer")
 
-# ========== Previews (below title) ==========
+# ========== Previews ==========
 df1_prev = _read_preview(file1, skip1) if file1 else None
 df2_prev = _read_preview(file2, skip2) if file2 else None
 
