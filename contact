@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Contact Us</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f5f6fa; margin: 0; padding: 0; }
+    .container {
+      max-width: 600px;
+      margin: 50px auto;
+      background: #fff;
+      padding: 25px;
+      border-radius: 10px;
+      box-shadow: 0 6px 18px rgba(0,0,0,.1);
+    }
+    h1 { text-align: center; color: #2c3e50; }
+    label { display:block; margin-top:15px; font-weight:bold; }
+    input, textarea, select {
+      width:100%; padding:12px; margin-top:6px;
+      border:1px solid #ccc; border-radius:6px;
+      font: inherit;
+    }
+    textarea { resize: vertical; min-height: 120px; }
+    button {
+      margin-top:18px; width:100%;
+      padding:14px; background:#2c3e50; color:#fff;
+      border:none; border-radius:6px; cursor:pointer; font-size:1rem;
+    }
+    button:hover { background:#1a242f; }
+    .alert {
+      display:none; margin-top:18px; padding:14px; border-radius:6px;
+      font-weight:600;
+    }
+    .success { background:#d1fae5; color:#065f46; }
+    .error { background:#fee2e2; color:#991b1b; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Contact Us</h1>
+    <form id="contact-form" action="https://formspree.io/f/YOUR_FORM_ID" method="POST">
+      <label for="name">Your Name</label>
+      <input id="name" type="text" name="name" required>
+
+      <label for="email">Your Email</label>
+      <input id="email" type="email" name="_replyto" required>
+
+      <label for="phone">Phone (optional)</label>
+      <input id="phone" type="tel" name="phone">
+
+      <label for="topic">Topic</label>
+      <select id="topic" name="topic">
+        <option>General Inquiry</option>
+        <option>Support</option>
+        <option>Partnership</option>
+        <option>Sales</option>
+      </select>
+
+      <label for="message">Your Message</label>
+      <textarea id="message" name="message" required></textarea>
+
+      <!-- hidden helpers -->
+      <input type="hidden" name="_subject" value="New Contact Form Submission" />
+      <input type="text" name="_gotcha" style="display:none" /> <!-- honeypot spam trap -->
+
+      <button type="submit">Send Message</button>
+
+      <div id="success" class="alert success">✅ Thank you! Your message has been sent.</div>
+      <div id="error" class="alert error">⚠️ Oops! Something went wrong. Please try again.</div>
+    </form>
+  </div>
+
+  <script>
+    const form = document.getElementById('contact-form');
+    const success = document.getElementById('success');
+    const error = document.getElementById('error');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      success.style.display = 'none';
+      error.style.display = 'none';
+
+      const formData = new FormData(form);
+
+      try {
+        const res = await fetch(form.action, {
+          method: form.method,
+          body: formData,
+          headers: { 'Accept': 'application/json' }
+        });
+
+        if (res.ok) {
+          form.reset();
+          success.style.display = 'block';
+        } else {
+          const data = await res.json().catch(() => ({}));
+          error.textContent = data.errors?.[0]?.message || '⚠️ Oops! Something went wrong.';
+          error.style.display = 'block';
+        }
+      } catch (err) {
+        error.textContent = '⚠️ Network error. Please try again.';
+        error.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>
