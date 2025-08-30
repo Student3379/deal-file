@@ -3,14 +3,11 @@ import re
 import warnings
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 warnings.filterwarnings("ignore")
 st.set_page_config(page_title="DEAL File", page_icon="📂", layout="wide")
 
-# --- Force embed mode & hide Streamlit chrome (CSS + JS + MutationObserver) ---
-
-PREVIEW_ROWS = 1000
+PREVIEW_ROWS = 100
 
 def _arrow_safe_df(df: pd.DataFrame | None) -> pd.DataFrame | None:
     if df is None or not isinstance(df, pd.DataFrame):
@@ -92,6 +89,35 @@ def _read_full(uploaded, skiprows=0):
     if name.lower().endswith(".csv"): return _read_csv_full(data, skiprows=skiprows)
     return _read_excel_full(data, file_name=name, skiprows=skiprows)
 
+def _clean_text_like(s: pd.Series, *, lower: bool = True, strip_all_ws: bool = True) -> pd.Series:
+
+    out = s.astype(str)
+    # normalize Unicode spaces to single spaces first
+    out = out.str.replace(r"\s+", " ", regex=True).str.strip()
+    # Excel artifact like '123.0' -> '123'
+    out = out.str.replace(r"\.0$", "", regex=True)
+    if strip_all_ws:
+        out = out.str.replace(" ", "", regex=False)
+    if lower:
+        out = out.str.lower()
+    return out
+
+def _smart_align_keys(left: pd.Series, right: pd.Series):
+
+    l_num = pd.to_numeric(left, errors="coerce")
+    r_num = pd.to_numeric(right, errors="coerce")
+    if not l_num.isna().all() and not r_num.isna().all():
+        # If both have valid numbers, prefer Int64 when possible
+        l_int_ok = ((l_num.dropna() % 1) == 0).all()
+        r_int_ok = ((r_num.dropna() % 1) == 0).all()
+        if l_int_ok and r_int_ok:
+            return l_num.astype("Int64"), r_num.astype("Int64"), "auto:number(Int64)"
+        return l_num, r_num, "auto:number(float)"
+    # Fallback to robust text normalization (case + whitespace insensitive)
+    lt = _clean_text_like(left, lower=True, strip_all_ws=True)
+    rt = _clean_text_like(right, lower=True, strip_all_ws=True)
+    return lt, rt, "auto:text(case+whitespace-insensitive)"
+
 st.sidebar.header("Upload Files")
 
 file1 = st.sidebar.file_uploader("First File", type=["csv", "xlsx", "xls"], key="file1")
@@ -118,9 +144,10 @@ with st.container():
                 st.session_state.show_merge = not st.session_state.show_merge
     st.markdown('</div></div>', unsafe_allow_html=True)
 
+
 if st.session_state.show_vlookup:
     st.markdown("---")
-    st.subheader("🔍 VLOOKUP (File 2 → File 1)")
+    st.subheader("🔍 VLOOKUP (File 1 → File 2)")
 
     if not (file1 and file2):
         st.info("Upload both files first to use VLOOKUP.")
@@ -138,50 +165,55 @@ if st.session_state.show_vlookup:
             with st.form("vlookup_form", clear_on_submit=False):
                 a, b, c = st.columns(3)
                 with a:
-                    left_key  = st.selectbox("Key column in File 1", options=cols1)
+                    left_key  = st.selectbox("Key column in File 1", options=cols1, key="vk_left")
                 with b:
-                    right_key = st.selectbox("Key column in File 2", options=cols2)
+                    right_key = st.selectbox("Key column in File 2", options=cols2, key="vk_right")
                 with c:
                     fetch_cols = st.multiselect(
                         "Columns to bring from File 2",
                         options=[col for col in cols2 if col != right_key],
+                        default=[]
                     )
                 run = st.form_submit_button("Apply VLOOKUP")
 
             if run:
                 try:
                     right = df2_full.drop_duplicates(subset=[right_key], keep="first")
-                    renamed_cols = {col: col for col in fetch_cols if col in df1_full.columns}
-                    right = right.rename(columns=renamed_cols)
-                    use_cols = [right_key] + [renamed_cols.get(c, c) for c in fetch_cols]
 
-                    merged = df1_full.merge(
+                    # Auto-align keys (numeric if both numeric; else case+whitespace-insensitive text)
+                    lnorm, rnorm, label = _smart_align_keys(df1_full[left_key], right[right_key])
+
+                    df1_join = df1_full.copy()
+                    right = right.copy()
+                    df1_join["_join_key_"] = lnorm
+                    right["_join_key_"] = rnorm
+
+                    # Avoid name clashes for fetched columns
+                    renamed_cols = {col: col for col in fetch_cols if col in df1_join.columns}
+                    right = right.rename(columns=renamed_cols)
+                    use_cols = ["_join_key_"] + [renamed_cols.get(c, c) for c in fetch_cols]
+
+                    merged = df1_join.merge(
                         right[use_cols],
                         how="left",
-                        left_on=left_key,
-                        right_on=right_key,
-                        suffixes=("", " "),
-                    )
+                        left_on="_join_key_",
+                        right_on="_join_key_",
+                        suffixes=("", " ")
+                    ).drop(columns=["_join_key_"], errors="ignore")
 
-                    if right_key != left_key and right_key in merged.columns:
-                        merged.drop(columns=[right_key], inplace=True)
-
-                    # Preview
                     merged_preview = _arrow_safe_df(merged.head(PREVIEW_ROWS))
                     st.dataframe(merged_preview, width="stretch", height=440)
 
-                    # Build output filename using originals (without extensions)
                     f1 = (file1.name.rsplit('.', 1)[0] if file1 else "file1").strip().replace(" ", "_")
                     f2 = (file2.name.rsplit('.', 1)[0] if file2 else "file2").strip().replace(" ", "_")
-                    output_name = f"vlookup_{f1}_{f2}.xlsx"
+                    output_name = f"{f1}_{f2}.xlsx"
 
-                    # Download as Excel
                     xbuf = io.BytesIO()
                     with pd.ExcelWriter(xbuf, engine="openpyxl") as writer:
                         merged.to_excel(writer, index=False, sheet_name="VLOOKUP")
                     xbuf.seek(0)
                     st.download_button(
-                        "⬇️ Download VLOOKUP Result (Excel)",
+                        "⬇️ Download",
                         data=xbuf,
                         file_name=output_name,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -192,16 +224,16 @@ if st.session_state.show_vlookup:
 
 if st.session_state.show_merge:
     st.markdown("---")
-    st.subheader("🧾 Merge Files into One Excel (Rows Appended, Columns Auto-Union)")
+    st.subheader("🧾 Merge Files into Excel")
 
     with st.form("merge_form_simple", clear_on_submit=False):
         files_to_merge = st.file_uploader(
-            "Pick files to merge (CSV/XLSX/XLS) — drag & drop multiple",
+            "Drag & Drop multiple in (CSV/XLSX/XLS)",
             type=["csv", "xlsx", "xls"],
             accept_multiple_files=True,
             key="merge_files_uploader_simple",
         )
-        run_merge = st.form_submit_button("Build Single Excel")
+        run_merge = st.form_submit_button("Excel")
 
     if run_merge:
         try:
@@ -209,7 +241,6 @@ if st.session_state.show_merge:
             if not selected:
                 st.warning("Please select at least one file.")
             else:
-                # Read & normalize (auto-union columns)
                 frames, all_cols = [], set()
                 for up in selected:
                     name = up.name
@@ -230,24 +261,18 @@ if st.session_state.show_merge:
                         if c not in tmp.columns:
                             tmp[c] = pd.NA
                     tmp = tmp[all_cols]
-                    tmp["__source_file"] = nm
                     combined.append(tmp)
 
                 combined_df = pd.concat(combined, ignore_index=True)
 
-                # Write single-sheet Excel
                 out = io.BytesIO()
                 with pd.ExcelWriter(out, engine="openpyxl") as writer:
                     combined_df.to_excel(writer, index=False, sheet_name="Combined")
                 out.seek(0)
 
-                # Filename from first couple of files
-                parts = [f.name.rsplit('.',1)[0] for f in selected[:3]]
-                if len(selected) > 3:
-                    parts.append(f"+{len(selected)-3}more")
-                out_name = (("_".join(p.replace(" ", "_") for p in parts) or "merged") + ".xlsx")
+                out_name = (( "Merged") + ".xlsx")
 
-                st.success("Single-sheet Excel is ready.")
+                st.success("Excel File Generated")
                 st.download_button(
                     "⬇️ Download Combined Excel",
                     data=out,
@@ -255,13 +280,13 @@ if st.session_state.show_merge:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
 
-                st.caption("Preview of 'Combined' (first rows)")
+                st.caption("Preview of Combined File")
                 st.dataframe(_arrow_safe_df(combined_df.head(PREVIEW_ROWS)), width="stretch", height=420)
 
         except Exception as e:
             st.error(f"Merge failed: {e}")
 
-st.title("📂 File Viewer")
+st.title("📂")
 
 df1_prev = _read_preview(file1, skip1) if file1 else None
 df2_prev = _read_preview(file2, skip2) if file2 else None
