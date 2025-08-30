@@ -293,20 +293,16 @@ if st.session_state.show_merge:
                 with pd.ExcelWriter(out, engine="openpyxl") as writer:
                     combined_df.to_excel(writer, index=False, sheet_name="Combined")
                 out.seek(0)
-
                 out_name = "Merged.xlsx"
-
                 st.success("Excel File Generated")
-                st.download_button(
-                    "⬇️ Download Combined Excel",
-                    data=out,
-                    file_name=out_name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-
                 st.caption("Preview of Combined File")
                 st.dataframe(_arrow_safe_df(combined_df.head(PREVIEW_ROWS)), width="stretch", height=420)
-
+                st.download_button(
+                                    "⬇️ Download Combined Excel",
+                                    data=out,
+                                    file_name=out_name,
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                )
         except Exception as e:
             st.error(f"Merge failed: {e}")
 
