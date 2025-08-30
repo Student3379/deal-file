@@ -1,4 +1,3 @@
-# app.py
 import io
 import warnings
 from typing import Optional
@@ -6,46 +5,34 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-# ---------------------------------------------------------------------
-# App setup
-# ---------------------------------------------------------------------
+# --- Streamlit / App Setup ----------------------------------------------------
 warnings.filterwarnings("ignore")
 st.set_page_config(page_title="DEAL File", page_icon="📂", layout="wide")
 
-# 🔒 Full white-label: hide all Streamlit chrome (bottom icons, top actions, menu/header/footer)
-st.markdown("""
-<style>
-/* Floating toolbar / status (blue icon) */
-[data-testid="stToolbar"],
-[data-testid="stStatusWidget"],
-[data-testid="stDecoration"],
-[data-testid="stBottomToolbar"],
-[data-testid="stFloatingActionButton"] {
-  visibility: hidden !important; display: none !important;
-}
-/* Deploy / viewer badge (red crown) */
-.stAppDeployButton,
-.viewerBadge_container__1QSob,
-.viewerBadge_link__1S137,
-a[data-testid="stDeployButton"],
-a[href*="streamlit.io/cloud"] {
-  visibility: hidden !important; display: none !important;
-}
-/* Top-right action icons (Fork / GitHub / …) */
-[data-testid="stHeaderActionElements"] { display: none !important; }
-/* Menu, header, footer */
-#MainMenu { visibility: hidden !important; }
-header, footer { visibility: hidden !important; }
-/* Safety: kill any stray fixed buttons at page bottom */
-div[style*="position: fixed"][style*="bottom"] { pointer-events: none; }
-</style>
-""", unsafe_allow_html=True)
+# 🔒 Hide all Streamlit chrome (floating toolbar, top-right icons, menu, header, footer)
+_hide_all_streamlit_ui = """
+    <style>
+    /* Floating toolbar / deploy / status */
+    [data-testid="stToolbar"] {visibility: hidden !important;}
+    [data-testid="stDecoration"] {visibility: hidden !important;}
+    [data-testid="stStatusWidget"] {visibility: hidden !important;}
+    .viewerBadge_container__1QSob {display: none !important;}
+    .stAppDeployButton {display: none !important;}
+
+    /* Top-right action icons (Fork / GitHub / …) */
+    [data-testid="stHeaderActionElements"] {display: none !important;}
+
+    /* Streamlit menu, header, footer */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    </style>
+"""
+st.markdown(_hide_all_streamlit_ui, unsafe_allow_html=True)
 
 PREVIEW_ROWS = 100
 
-# ---------------------------------------------------------------------
-# Utilities
-# ---------------------------------------------------------------------
+# --- Utilities ----------------------------------------------------------------
 def _arrow_safe_df(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
     if df is None or not isinstance(df, pd.DataFrame):
         return df
@@ -85,9 +72,7 @@ def _read_excel_generic(content_bytes: bytes, *, file_name: str, skiprows: int =
                 st.error("Failed to read .xlsx. Install openpyxl: `pip install openpyxl`")
             raise e2
 
-# ---------------------------------------------------------------------
-# Cached readers
-# ---------------------------------------------------------------------
+# --- Cached Readers ------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def _read_csv_preview(content_bytes: bytes, skiprows: int = 0, nrows: int = PREVIEW_ROWS):
     buf = io.BytesIO(content_bytes)
@@ -114,9 +99,7 @@ def _read_csv_full(content_bytes: bytes, skiprows: int = 0):
 def _read_excel_full(content_bytes: bytes, file_name: str, skiprows: int = 0, sheet_name=0):
     return _read_excel_generic(content_bytes, file_name=file_name, skiprows=skiprows, nrows=None, sheet_name=sheet_name)
 
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
+# --- File helpers --------------------------------------------------------------
 def _file_to_bytes(uploaded):  return uploaded.getvalue() if uploaded else None
 def _safe_cols(df: pd.DataFrame) -> list[str]: return [str(c) for c in df.columns]
 
@@ -132,9 +115,7 @@ def _read_full(uploaded, skiprows: int = 0):
     if name.lower().endswith(".csv"): return _read_csv_full(data, skiprows=skiprows)
     return _read_excel_full(data, file_name=name, skiprows=skiprows)
 
-# ---------------------------------------------------------------------
-# Key normalization / alignment
-# ---------------------------------------------------------------------
+# --- Key normalization / alignment --------------------------------------------
 def _clean_text_like(s: pd.Series, *, lower: bool = True, strip_all_ws: bool = True) -> pd.Series:
     out = s.astype(str)
     out = out.str.replace(r"\s+", " ", regex=True).str.strip()
@@ -158,9 +139,7 @@ def _smart_align_keys(left: pd.Series, right: pd.Series):
     rt = _clean_text_like(right, lower=True, strip_all_ws=True)
     return lt, rt, "auto:text(case+whitespace-insensitive)"
 
-# ---------------------------------------------------------------------
-# UI: Sidebar
-# ---------------------------------------------------------------------
+# --- Sidebar / Controls --------------------------------------------------------
 st.sidebar.header("Upload Files")
 
 file1 = st.sidebar.file_uploader("First File", type=["csv", "xlsx", "xls"], key="file1")
@@ -176,7 +155,7 @@ if "show_merge"   not in st.session_state: st.session_state.show_merge   = False
 
 with st.container():
     st.markdown('<div class="topbar-sticky"><div class="topbar-card">', unsafe_allow_html=True)
-    _, top_r = st.columns([0.75, 0.25])
+    top_l, top_r = st.columns([0.75, 0.25])
     with top_r:
         col_a, col_b = st.columns(2)
         with col_a:
@@ -187,9 +166,7 @@ with st.container():
                 st.session_state.show_merge = not st.session_state.show_merge
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------
-# VLOOKUP
-# ---------------------------------------------------------------------
+# --- VLOOKUP -------------------------------------------------------------------
 if st.session_state.show_vlookup:
     st.markdown("---")
     st.subheader("🔍 VLOOKUP (File 1 → File 2)")
@@ -225,7 +202,7 @@ if st.session_state.show_vlookup:
                 try:
                     right = df2_full.drop_duplicates(subset=[right_key], keep="first")
 
-                    # Auto-align keys
+                    # Auto-align keys (numeric if both numeric; else case+whitespace-insensitive text)
                     lnorm, rnorm, _ = _smart_align_keys(df1_full[left_key], right[right_key])
 
                     df1_join = df1_full.copy()
@@ -247,7 +224,8 @@ if st.session_state.show_vlookup:
                         suffixes=("", " ")
                     ).drop(columns=["_join_key_"], errors="ignore")
 
-                    st.dataframe(_arrow_safe_df(merged.head(PREVIEW_ROWS)), width="stretch", height=440)
+                    merged_preview = _arrow_safe_df(merged.head(PREVIEW_ROWS))
+                    st.dataframe(merged_preview, width="stretch", height=440)
 
                     f1 = (file1.name.rsplit('.', 1)[0] if file1 else "file1").strip().replace(" ", "_")
                     f2 = (file2.name.rsplit('.', 1)[0] if file2 else "file2").strip().replace(" ", "_")
@@ -263,12 +241,11 @@ if st.session_state.show_vlookup:
                         file_name=output_name,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
+
                 except Exception as e:
                     st.error(f"VLOOKUP failed: {e}")
 
-# ---------------------------------------------------------------------
-# Merge files
-# ---------------------------------------------------------------------
+# --- Merge Files ---------------------------------------------------------------
 if st.session_state.show_merge:
     st.markdown("---")
     st.subheader("🧾 Merge Files into Excel")
@@ -291,7 +268,7 @@ if st.session_state.show_merge:
                 frames, all_cols = [], set()
                 for up in selected:
                     name = up.name
-                    data = up.getvalue()
+                    data = _file_to_bytes(up)
                     if name.lower().endswith(".csv"):
                         df = pd.read_csv(io.BytesIO(data))
                     else:
@@ -317,11 +294,13 @@ if st.session_state.show_merge:
                     combined_df.to_excel(writer, index=False, sheet_name="Combined")
                 out.seek(0)
 
+                out_name = "Merged.xlsx"
+
                 st.success("Excel File Generated")
                 st.download_button(
                     "⬇️ Download Combined Excel",
                     data=out,
-                    file_name="Merged.xlsx",
+                    file_name=out_name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
 
@@ -331,9 +310,7 @@ if st.session_state.show_merge:
         except Exception as e:
             st.error(f"Merge failed: {e}")
 
-# ---------------------------------------------------------------------
-# Bottom previews
-# ---------------------------------------------------------------------
+# --- Bottom area: Previews -----------------------------------------------------
 st.title("📂")
 
 df1_prev = _read_preview(file1, skip1) if file1 else None
