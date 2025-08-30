@@ -1,15 +1,39 @@
 import io
-import re
 import warnings
+from typing import Optional
+
 import pandas as pd
 import streamlit as st
 
+# --- Streamlit / App Setup ----------------------------------------------------
 warnings.filterwarnings("ignore")
 st.set_page_config(page_title="DEAL File", page_icon="📂", layout="wide")
 
+# 🔒 Hide all Streamlit chrome (floating toolbar, top-right icons, menu, header, footer)
+_hide_all_streamlit_ui = """
+    <style>
+    /* Floating toolbar / deploy / status */
+    [data-testid="stToolbar"] {visibility: hidden !important;}
+    [data-testid="stDecoration"] {visibility: hidden !important;}
+    [data-testid="stStatusWidget"] {visibility: hidden !important;}
+    .viewerBadge_container__1QSob {display: none !important;}
+    .stAppDeployButton {display: none !important;}
+
+    /* Top-right action icons (Fork / GitHub / …) */
+    [data-testid="stHeaderActionElements"] {display: none !important;}
+
+    /* Streamlit menu, header, footer */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    </style>
+"""
+st.markdown(_hide_all_streamlit_ui, unsafe_allow_html=True)
+
 PREVIEW_ROWS = 100
 
-def _arrow_safe_df(df: pd.DataFrame | None) -> pd.DataFrame | None:
+# --- Utilities ----------------------------------------------------------------
+def _arrow_safe_df(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
     if df is None or not isinstance(df, pd.DataFrame):
         return df
     out = df.copy()
@@ -26,12 +50,12 @@ def _arrow_safe_df(df: pd.DataFrame | None) -> pd.DataFrame | None:
                 out[c] = out[c].astype(str)
     return out
 
-def _excel_engine_for_name(lower_name: str) -> str | None:
+def _excel_engine_for_name(lower_name: str) -> Optional[str]:
     if lower_name.endswith(".xls"):  return "xlrd"
     if lower_name.endswith(".xlsx"): return "openpyxl"
     return None
 
-def _read_excel_generic(content_bytes: bytes, *, file_name: str, skiprows: int = 0, sheet_name=0, nrows: int | None = None):
+def _read_excel_generic(content_bytes: bytes, *, file_name: str, skiprows: int = 0, sheet_name=0, nrows: Optional[int] = None):
     lower = file_name.lower() if file_name else ""
     engine = _excel_engine_for_name(lower)
     buf = io.BytesIO(content_bytes)
@@ -48,6 +72,7 @@ def _read_excel_generic(content_bytes: bytes, *, file_name: str, skiprows: int =
                 st.error("Failed to read .xlsx. Install openpyxl: `pip install openpyxl`")
             raise e2
 
+# --- Cached Readers ------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def _read_csv_preview(content_bytes: bytes, skiprows: int = 0, nrows: int = PREVIEW_ROWS):
     buf = io.BytesIO(content_bytes)
@@ -74,27 +99,26 @@ def _read_csv_full(content_bytes: bytes, skiprows: int = 0):
 def _read_excel_full(content_bytes: bytes, file_name: str, skiprows: int = 0, sheet_name=0):
     return _read_excel_generic(content_bytes, file_name=file_name, skiprows=skiprows, nrows=None, sheet_name=sheet_name)
 
+# --- File helpers --------------------------------------------------------------
 def _file_to_bytes(uploaded):  return uploaded.getvalue() if uploaded else None
-def _safe_cols(df):            return [str(c) for c in df.columns]
+def _safe_cols(df: pd.DataFrame) -> list[str]: return [str(c) for c in df.columns]
 
-def _read_preview(uploaded, skiprows=0):
+def _read_preview(uploaded, skiprows: int = 0):
     if not uploaded: return None
     data = _file_to_bytes(uploaded); name = uploaded.name
     if name.lower().endswith(".csv"): return _read_csv_preview(data, skiprows=skiprows, nrows=PREVIEW_ROWS)
     return _read_excel_preview(data, file_name=name, skiprows=skiprows, nrows=PREVIEW_ROWS)
 
-def _read_full(uploaded, skiprows=0):
+def _read_full(uploaded, skiprows: int = 0):
     if not uploaded: return None
     data = _file_to_bytes(uploaded); name = uploaded.name
     if name.lower().endswith(".csv"): return _read_csv_full(data, skiprows=skiprows)
     return _read_excel_full(data, file_name=name, skiprows=skiprows)
 
+# --- Key normalization / alignment --------------------------------------------
 def _clean_text_like(s: pd.Series, *, lower: bool = True, strip_all_ws: bool = True) -> pd.Series:
-
     out = s.astype(str)
-    # normalize Unicode spaces to single spaces first
     out = out.str.replace(r"\s+", " ", regex=True).str.strip()
-    # Excel artifact like '123.0' -> '123'
     out = out.str.replace(r"\.0$", "", regex=True)
     if strip_all_ws:
         out = out.str.replace(" ", "", regex=False)
@@ -103,21 +127,19 @@ def _clean_text_like(s: pd.Series, *, lower: bool = True, strip_all_ws: bool = T
     return out
 
 def _smart_align_keys(left: pd.Series, right: pd.Series):
-
     l_num = pd.to_numeric(left, errors="coerce")
     r_num = pd.to_numeric(right, errors="coerce")
     if not l_num.isna().all() and not r_num.isna().all():
-        # If both have valid numbers, prefer Int64 when possible
         l_int_ok = ((l_num.dropna() % 1) == 0).all()
         r_int_ok = ((r_num.dropna() % 1) == 0).all()
         if l_int_ok and r_int_ok:
             return l_num.astype("Int64"), r_num.astype("Int64"), "auto:number(Int64)"
         return l_num, r_num, "auto:number(float)"
-    # Fallback to robust text normalization (case + whitespace insensitive)
     lt = _clean_text_like(left, lower=True, strip_all_ws=True)
     rt = _clean_text_like(right, lower=True, strip_all_ws=True)
     return lt, rt, "auto:text(case+whitespace-insensitive)"
 
+# --- Sidebar / Controls --------------------------------------------------------
 st.sidebar.header("Upload Files")
 
 file1 = st.sidebar.file_uploader("First File", type=["csv", "xlsx", "xls"], key="file1")
@@ -144,7 +166,7 @@ with st.container():
                 st.session_state.show_merge = not st.session_state.show_merge
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-
+# --- VLOOKUP -------------------------------------------------------------------
 if st.session_state.show_vlookup:
     st.markdown("---")
     st.subheader("🔍 VLOOKUP (File 1 → File 2)")
@@ -181,7 +203,7 @@ if st.session_state.show_vlookup:
                     right = df2_full.drop_duplicates(subset=[right_key], keep="first")
 
                     # Auto-align keys (numeric if both numeric; else case+whitespace-insensitive text)
-                    lnorm, rnorm, label = _smart_align_keys(df1_full[left_key], right[right_key])
+                    lnorm, rnorm, _ = _smart_align_keys(df1_full[left_key], right[right_key])
 
                     df1_join = df1_full.copy()
                     right = right.copy()
@@ -189,9 +211,10 @@ if st.session_state.show_vlookup:
                     right["_join_key_"] = rnorm
 
                     # Avoid name clashes for fetched columns
-                    renamed_cols = {col: col for col in fetch_cols if col in df1_join.columns}
-                    right = right.rename(columns=renamed_cols)
-                    use_cols = ["_join_key_"] + [renamed_cols.get(c, c) for c in fetch_cols]
+                    clashes = [c for c in fetch_cols if c in df1_join.columns]
+                    renames = {c: f"{c}_from_file2" for c in clashes}
+                    right = right.rename(columns=renames)
+                    use_cols = ["_join_key_"] + [renames.get(c, c) for c in fetch_cols]
 
                     merged = df1_join.merge(
                         right[use_cols],
@@ -222,6 +245,7 @@ if st.session_state.show_vlookup:
                 except Exception as e:
                     st.error(f"VLOOKUP failed: {e}")
 
+# --- Merge Files ---------------------------------------------------------------
 if st.session_state.show_merge:
     st.markdown("---")
     st.subheader("🧾 Merge Files into Excel")
@@ -255,7 +279,7 @@ if st.session_state.show_merge:
 
                 all_cols = list(all_cols)
                 combined = []
-                for nm, df in frames:
+                for _, df in frames:
                     tmp = df.copy()
                     for c in all_cols:
                         if c not in tmp.columns:
@@ -270,7 +294,7 @@ if st.session_state.show_merge:
                     combined_df.to_excel(writer, index=False, sheet_name="Combined")
                 out.seek(0)
 
-                out_name = (( "Merged") + ".xlsx")
+                out_name = "Merged.xlsx"
 
                 st.success("Excel File Generated")
                 st.download_button(
@@ -286,6 +310,7 @@ if st.session_state.show_merge:
         except Exception as e:
             st.error(f"Merge failed: {e}")
 
+# --- Bottom area: Previews -----------------------------------------------------
 st.title("📂")
 
 df1_prev = _read_preview(file1, skip1) if file1 else None
